@@ -1,36 +1,45 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# JobPilot
 
-## Getting Started
+An AI-assisted job-matching and application-drafting tool. It matches job
+postings against your resume, drafts a tailored application, and hands it
+to you for review — you always click submit yourself. See `specs/` for the
+full build plan and non-negotiable rules (`specs/01-CONSTITUTION.md`).
 
-First, run the development server:
+## Phase 1 — Foundation
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Sets up: Next.js app, Supabase (Postgres + pgvector + Storage), Google
+sign-in, and `CRON_SECRET`-gated stub routes for the pipeline endpoints
+that later phases fill in.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Setup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Copy `.env.example` to `.env.local` and fill in every value (see the
+   comment above each var for where to get it).
+2. Create a Supabase project. In the SQL Editor, run
+   `supabase/migrations/0001_init.sql`.
+3. In Google Cloud Console, create an OAuth client (Web application),
+   with `http://localhost:3000/api/auth/callback/google` as an authorized
+   redirect URI for local dev (add the production URL's equivalent once
+   deployed).
+4. `npm install`
+5. `npm run dev`, then open [http://localhost:3000](http://localhost:3000).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Manual test checklist (Phase 1)
 
-## Learn More
+- [ ] `npm run dev` starts without errors given a complete `.env.local`
+- [ ] Starting the app with a `.env.local` missing a required var fails
+      immediately with a clear error (not a silent misbehavior)
+- [ ] Clicking "Sign in with Google" completes the OAuth round-trip and
+      lands on `/dashboard`
+- [ ] Denying the Google consent screen lands on a clear retry page, not a crash
+- [ ] Visiting `/dashboard` while signed out redirects to `/`
+- [ ] `/api/health` returns `200` with `{ app: "ok", db: "ok" }` when Supabase is reachable
+- [ ] `/api/ingest`, `/api/match`, `/api/draft`, `/api/notify` all return
+      `401` when called without a `CRON_SECRET` bearer token, and `501`
+      when called with the correct one (expected until their real phases land)
+- [ ] Signing in creates a row in Supabase's `users` table
 
-To learn more about Next.js, take a look at the following resources:
+## Learn more about the Next.js template
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This project was bootstrapped with `create-next-app`. See
+[Next.js Documentation](https://nextjs.org/docs) for framework details.
