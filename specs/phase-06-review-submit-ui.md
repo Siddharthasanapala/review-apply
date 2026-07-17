@@ -38,6 +38,12 @@ UI enforcement — treat it as the most important phase to get right.
   before they apply — show a "this posting may no longer be live" banner
   (cross-check against Phase 2's `likely_expired` flag) rather than letting
   them click through to a dead link with no warning.
+- **Posting legitimacy** (user-raised requirement, see
+  12-EDGE-CASES-REGISTRY.md "Fake/scam postings") — surface the source
+  trust level (official ATS vs aggregator vs manual entry) and any Phase 4
+  legitimacy `flags` clearly on the review screen, not buried, so the user
+  can sanity-check an unfamiliar aggregator/manual posting before spending
+  time on the application.
 - **User wants to bulk-dismiss** low-relevance matches — support bulk
   actions so the review queue doesn't become unmanageable at scale.
 - **Draft contains a placeholder the user never filled in** — block "Mark

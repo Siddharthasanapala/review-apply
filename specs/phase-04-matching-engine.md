@@ -53,6 +53,17 @@ matched/missing skill lists.
   clearance, work authorization, specific certification) — surface as a
   `flags` entry so the user sees it before investing review time, don't
   silently score it down without explanation.
+- **Posting legitimacy** (user-raised requirement, see
+  12-EDGE-CASES-REGISTRY.md "Fake/scam postings") — jobs from official ATS
+  sources (Greenhouse etc.) are the company's own posting system, inherently
+  trustworthy; jobs from aggregators (Adzuna) or manual entry are not
+  independently verified. Add a `flags` entry (e.g. "Aggregator-sourced —
+  not independently verified, confirm the company/posting is legitimate
+  before applying") for any `job_match` whose `job.entry_method = 'manual'`
+  or whose source is an `aggregator_api`. A deeper check (cross-referencing
+  company reviews on other sites) needs new external API research first —
+  out of scope for this pass, don't build it without verifying that API's
+  terms per CONSTITUTION.md.
 - **Gemini returns malformed JSON** — schema-validate; retry once; if it
   still fails, mark the match `status = 'match_failed'` and surface in an
   admin/debug view rather than crashing the pipeline for other jobs.

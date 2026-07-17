@@ -26,6 +26,9 @@ rows as you discover issues in real use — don't let this go stale.
 - [ ] Manually-entered job checked against dedupe hash so it links to an
       existing auto-ingested duplicate instead of creating a redundant row
 - [ ] Cron-triggered ingestion routes reject requests without a valid `CRON_SECRET`
+- [ ] Source trust level (official ATS vs aggregator vs user-pasted) is
+      distinguishable downstream, so lower-trust postings can be flagged
+      before the user invests time in them (see "Fake/scam postings" below)
 
 ## Profile ingestion
 - [ ] Low-confidence PDF text extraction detected, fallback offered
@@ -41,6 +44,19 @@ rows as you discover issues in real use — don't let this go stale.
 - [ ] Unverifiable requirements (clearance, authorization) flagged, not guessed
 - [ ] Daily Gemini call cap prevents runaway cost
 - [ ] False-positive keyword-only matches caught by rationale requirement
+- [ ] **Fake/scam postings** — not every ingested job is a real opportunity,
+      especially from aggregators or user-pasted links (user-raised
+      requirement, 2026-07-17). Jobs from official ATS sources (Greenhouse
+      etc.) are inherently trustworthy — they're the company's own posting
+      system. Aggregator (Adzuna) and manual-entry jobs are not verified
+      and should carry a lower trust signal. Full "verify against company
+      reviews on other sites" would need new external API research (no
+      obvious compliant Glassdoor/Indeed-reviews API — verify ToS before
+      building, per CONSTITUTION.md's diligence requirement) or an
+      LLM-grounded web-search check at matching time. Landing spot: Phase 4
+      (Matching) for the risk assessment itself, Phase 6 (Review UI) for
+      surfacing it clearly before the user clicks through. Not built yet —
+      logged here so it isn't silently dropped.
 
 ## Drafting
 - [ ] Fabrication check (separate critic Gemini call, not string-diffing)
@@ -53,6 +69,9 @@ rows as you discover issues in real use — don't let this go stale.
 - [ ] Zero network paths submit an application without explicit user click
 - [ ] Placeholder fields visually unmissable
 - [ ] Dead/expired postings warned before user clicks through
+- [ ] Legitimacy/trust signal (source type: official ATS vs aggregator vs
+      user-pasted) shown clearly per job, so the user can sanity-check
+      unfamiliar or aggregator-sourced postings before applying
 - [ ] Bulk actions available for queue management at scale
 - [ ] Mobile-usable review screen
 
