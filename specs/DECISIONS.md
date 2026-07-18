@@ -154,3 +154,88 @@ don't re-litigate an entry here without a concrete new reason.
   real config already seeded; it will start working the moment
   `ADZUNA_APP_ID`/`ADZUNA_APP_KEY` are set in `.env.local` and Vercel, no
   code changes needed.
+
+## Phase 3
+
+- **Libraries verified against current docs, not assumed**: `@google/genai`
+  (2.12.0) is the current official Gemini SDK — `ai.models.generateContent`
+  / `ai.models.embedContent` confirmed against the shipped `.d.ts` (a
+  newer `ai.interactions` agentic API also exists in the SDK but is
+  unnecessary complexity for one-shot extraction/embedding calls). `unpdf`
+  chosen over `pdf-parse` for PDF text extraction — zero native
+  dependencies, built for serverless/Vercel (pdf-parse depends on
+  `pdfjs-dist`'s optional `canvas` native module, a known Vercel build
+  failure). `mammoth` for DOCX (standard, pure JS).
+- **Models**: extraction uses `gemini-flash-latest` (low volume — only
+  runs on upload — so flash-tier quality is fine and keeps cost
+  predictable). Embedding uses `gemini-embedding-2` at 768 dimensions
+  (matches the `vector(768)` column from the Phase 1 migration; the
+  migration's original comment referenced `text-embedding-004`, which is
+  no longer current — the model name doesn't affect the schema since
+  dimension is set explicitly via `outputDimensionality`).
+- **Resume is the canonical/effective profile** (spec was ambiguous
+  between per-document vs. one combined embedding — see the assumption
+  flagged to the user before building): the resume row's `parsed_skills`
+  is what Settings displays/edits and what Phase 4 will read. Portfolio
+  gets its own row + embedding (for history), but its skills are always
+  merged (union, never overwrite) into the current resume row. User edits
+  via the Skills editor always land on the resume row and win over
+  whatever extraction/merge produced.
+- **Three real bugs found via end-to-end testing with the user's actual
+  resume and portfolio** (not caught by synthetic tests — worth calling
+  out since this is exactly why real-data verification matters):
+  1. **Silent failure in the UI**: `saveResumeDocument`/`savePortfolioDocument`
+     can insert a row successfully while extraction or embedding failed
+     (network/rate-limit issues) — the original `ResumeUploadForm`/
+     `PortfolioForm` only checked HTTP status and reported "saved" either
+     way, hiding a real failure (a resume saved with zero skills, no
+     visible error). Fixed: both forms now surface `extractionError`/
+     `embeddingError` from the response as a visible warning.
+  2. **No backoff on Gemini retries**: `extractProfile` retried once on
+     failure with zero delay — useless against a rate limit, since an
+     immediate retry hits the same limit again. `embedText` had no retry
+     at all, despite CONSTITUTION.md §4 requiring retry-with-backoff for
+     every external API call. Fixed: both now go through
+     `lib/gemini/retryWithBackoff.ts` (3 attempts, exponential delay,
+     matching the pattern already used for HTTP calls in
+     `lib/http/fetchWithRetry.ts`), and failures are logged server-side
+     so future issues are diagnosable from logs instead of reconstructed
+     forensically from DB state.
+  3. **ArrayBuffer detachment corrupting storage uploads**: the resume
+     route read the uploaded file into one `ArrayBuffer`, ran it through
+     `unpdf`'s PDF extraction, then uploaded that same buffer to Supabase
+     Storage — but PDF.js can transfer/detach the underlying buffer while
+     parsing, and two real uploads confirmed this landed as 0-byte files
+     in storage despite text extraction succeeding fine (extraction reads
+     the data before/during detachment, an independent copy operation
+     wasn't). Fixed: upload the pristine buffer to storage *before*
+     running it through extraction, not after.
+  4. **Stale client state in `SkillsEditor`** (not a data-layer bug, but
+     caused an apparent one): the component seeds `useState` from an
+     `initialSkills` prop with no `key`, so React preserves its internal
+     state across a `router.refresh()` after a new resume upload — a
+     "Save skills" click at that point PATCHes with the stale (possibly
+     empty, from before any resume existed) list, overwriting the
+     freshly-merged skills that had just saved correctly. This is what
+     actually produced a couple of the "empty skills" rows initially
+     misdiagnosed as extraction failures. Fixed: `SkillsEditor` now gets
+     `key={resume.id}` so it remounts (resetting state) whenever the
+     underlying resume document changes.
+  Takeaway logged for future phases: when a "bug" reproduces, verify each
+  layer independently (raw text → LLM call → save function → route →
+  UI) before assuming the most recently-touched code is at fault — three
+  of these four issues were in different layers than initially suspected.
+- **Known limitation, not fixed**: if resume and portfolio are saved
+  within seconds of each other (as happened during rapid manual testing),
+  the two saves' merge-back steps can race — whichever save's
+  `getLatestProfileDocument` read happens first won't see the other's
+  not-yet-committed row. Not fixed since normal usage (upload resume,
+  separately upload portfolio, each a deliberate action with time
+  between) won't hit this; revisit only if it causes a real problem.
+- **Sign-in restricted to the owner's email** (`ALLOWED_USER_EMAIL` env
+  var, checked in `src/auth.ts`'s `signIn` callback) — found during
+  testing that a second Google account had signed in and gotten its own
+  siloed profile, which isn't what "single-tenant" (CONSTITUTION.md §3)
+  is meant to guarantee for a deployed app with a public URL. Optional
+  (unset = no restriction) so this doesn't become a required-at-boot var
+  for anyone who forks this later.

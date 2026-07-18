@@ -21,6 +21,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return false;
       }
 
+      // Single-tenant app (CONSTITUTION.md §3) — only the owner's account
+      // may sign in. Without this, anyone who finds the deployed URL could
+      // sign in with their own Google account and get their own (empty)
+      // profile, which isn't what "single-tenant" is meant to guarantee.
+      if (env.ALLOWED_USER_EMAIL && user.email !== env.ALLOWED_USER_EMAIL) {
+        console.error(`Sign-in rejected for non-owner email: ${user.email}`);
+        return false;
+      }
+
       const supabase = getSupabaseServerClient();
       const { error } = await supabase.from("users").upsert(
         {

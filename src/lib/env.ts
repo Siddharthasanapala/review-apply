@@ -17,6 +17,9 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   CRON_SECRET: z.string().min(1),
+  // Optional: when set, only this email may sign in (see src/auth.ts). Not
+  // required at boot since an unset value just means "no restriction".
+  ALLOWED_USER_EMAIL: z.string().email().optional(),
 });
 
 function loadEnv() {
