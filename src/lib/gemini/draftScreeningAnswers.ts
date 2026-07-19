@@ -1,6 +1,7 @@
 import "server-only";
 import { getGeminiClient, MATCHING_MODEL } from "./client";
 import { retryWithBackoff } from "./retryWithBackoff";
+import { PLACEHOLDER_TEXT } from "@/lib/drafting/placeholderText";
 
 export interface ScreeningAnswer {
   question: string;
@@ -41,8 +42,6 @@ const RESPONSE_SCHEMA = {
   },
   required: ["answers", "additionalMaterialsRequested"],
 };
-
-const PLACEHOLDER_TEXT = "[Fill in yourself — this requires your own judgment call]";
 
 /** Keyword categories that must always be a placeholder, enforced in code
  * rather than trusted to the prompt alone (phase-05-drafting.md: "never

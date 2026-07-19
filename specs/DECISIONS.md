@@ -358,3 +358,87 @@ don't re-litigate an entry here without a concrete new reason.
   rather than generic filler; resume diff produced sensible
   section-level changes with stated reasons; fabrication check passed
   clean on the real (non-injected) tailored output.
+
+## Phase 6
+
+- **Status pipeline extended with `applied`**: `job_matches.status` only
+  had `new/reviewed/dismissed/drafted/match_failed` (Phase 4). Added
+  `applied` plus an `applied_at` timestamp (migration 0005) for the
+  "Mark as Applied" tracking action. Postgres check constraints can't be
+  altered in place, so the migration drops and recreates
+  `job_matches_status_check`.
+- **"Reviewed" is inferred, not a button** — a match flips from `drafted`
+  to `reviewed` automatically the first time its `/drafts/[id]` page is
+  loaded, or when the user saves an edit to the cover letter/screening
+  answers. Viewing or editing a draft is unambiguous evidence of review;
+  adding a dedicated "mark reviewed" button would just be one more click
+  for no real signal gain.
+- **"Mark as Applied" works with or without a draft.** The spec's dashboard
+  quick actions list it alongside "view draft"/"dismiss" as a per-row
+  action, and a user may reasonably apply to a job directly from the
+  company's site without ever drafting anything through this app first
+  (e.g. a below-threshold job they only glanced at). The apply route only
+  requires match ownership, not an existing `application_drafts` row; if
+  one exists, its status/`applied_at` are updated too for consistency.
+- **Soft-warning placeholder check is done by exact string match**, not a
+  stored boolean — `PLACEHOLDER_TEXT` was pulled out of
+  `draftScreeningAnswers.ts` (which has `import "server-only"`) into a
+  new `lib/drafting/placeholderText.ts` with no such import, so the
+  client-side `EditableScreeningAnswers`/`MarkAppliedButton` components
+  can compare the *current* (possibly user-edited) answer text against it
+  directly. This means editing a placeholder answer away from the exact
+  fixed string clears its "unfilled" warning immediately, without needing
+  a separate `filled` flag to track and keep in sync.
+- **Bulk-dismiss and dismiss both refuse to touch an `applied` match** —
+  dismissing something you've already applied to would be a confusing,
+  effectively-irreversible-feeling state change for a single-tenant
+  tracking tool; not allowed rather than silently overwritten.
+- **Dashboard's "Below threshold" section defaults to open, not
+  collapsed.** Built collapsed-by-default first per the spec's literal
+  "visible-but-collapsed" wording, but real testing showed this reads as
+  data loss: matching a job on-demand via "Match this job now" often
+  scores it below threshold, and having it immediately vanish into a
+  closed `<details>` looked exactly like the row had disappeared. Fixed
+  by defaulting the section open — still visually separated from the
+  active/above-threshold list (which was the actual point), but nothing
+  requires an extra click to discover right after the action that
+  produced it.
+- **Dashboard status filter (`active`/`applied`/`dismissed`/`all`) uses two
+  different query shapes**, not one query with a status `WHERE` clause
+  tacked on: the default `active`/`all` views are still "top 25 jobs by
+  `last_seen_at`, left-joined to this profile version's matches" (unscored
+  jobs need to stay visible so they can still be matched on-demand); the
+  `applied`/`dismissed` views instead query `job_matches` directly, since
+  by definition every row there already has a match and unscored jobs are
+  irrelevant to those filters.
+- **Real bug found via testing, diagnosed and ruled out as non-code**:
+  after clicking "Match this job now," the job briefly appeared to vanish
+  from the dashboard entirely (not just the below-threshold-collapse
+  issue above — this was before that fix even applied, and persisted one
+  test cycle after it). Confirmed via direct DB query that the
+  `job_matches` row was written correctly and within the fetched top-25
+  window both times; a hard reload (F5) then showed it correctly. Concluded
+  this was a client-side `router.refresh()` timing/cache artifact, not a
+  data or filtering bug — consistent with `MatchButton`/`DraftButton`
+  already relying on the same `router.refresh()` pattern in earlier
+  phases without issue. No code change made for this; noted here in case
+  it recurs and turns out not to be a one-off.
+- **No expired-posting banner exercised with real data** — no job in the
+  current dataset has `likely_expired = true` yet, so `/drafts/[id]`'s
+  "this posting may no longer be live" banner (conditioned on that same
+  column, already relied on elsewhere since Phase 2) is verified by code
+  review only, not a real end-to-end trigger. Low risk since it reuses an
+  existing, already-tested column and a simple conditional render.
+- **Verified with real data, not synthetic**: full manual walkthrough —
+  dashboard sort/filter/grouping, bulk-dismiss (moved jobs into the
+  Dismissed filter), single dismiss, on-demand match-then-appear flow,
+  editable cover letter save, editable screening-answer save (placeholder
+  highlight cleared on edit), and Mark as Applied (confirm-dialog warning
+  fired, status flipped to Applied ✓ and reflected on both the draft page
+  and the dashboard's Applied filter).
+- **Grepped the full `src/` tree for outbound submission paths** (Phase 6
+  exit criteria) — confirmed the only network calls anywhere are to this
+  app's own `/api/*` routes; the sole reference to an external job-posting
+  URL is a plain `<a href={job.description_url} target="_blank">` the
+  user clicks themselves. No automation library (Puppeteer/Playwright/
+  Selenium) is a direct dependency.

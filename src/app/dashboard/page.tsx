@@ -3,46 +3,153 @@ import { redirect } from "next/navigation";
 import { auth, signOut } from "@/auth";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getProfileForMatching } from "@/lib/matching/scoreJob";
-import { MatchButton } from "./MatchButton";
-import { DraftButton } from "./DraftButton";
+import { PLACEHOLDER_TEXT } from "@/lib/drafting/placeholderText";
+import { DashboardFilters } from "./DashboardFilters";
+import { MatchesList, type MatchRow } from "./MatchesList";
 
-export default async function DashboardPage() {
+interface ScreeningAnswer {
+  question: string;
+  answer: string;
+  isPlaceholder: boolean;
+}
+
+function countUnfilledPlaceholders(answers: ScreeningAnswer[] | null): number {
+  if (!answers) return 0;
+  return answers.filter((a) => a.isPlaceholder && a.answer.trim() === PLACEHOLDER_TEXT).length;
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string; status?: string }>;
+}) {
   const session = await auth();
-
   if (!session?.user?.email) {
     redirect("/");
   }
 
+  const { sort = "score", status: statusFilter = "active" } = await searchParams;
+
   const supabase = getSupabaseServerClient();
-  const { data: userRow } = await supabase.from("users").select("id").eq("email", session.user.email).single();
+  const { data: userRow } = await supabase.from("users").select("id, settings").eq("email", session.user.email).single();
   const userId = userRow?.id as string | undefined;
 
   const profile = userId ? await getProfileForMatching(supabase, userId) : null;
+  const matchThreshold =
+    ((userRow?.settings as Record<string, unknown> | null)?.matchThreshold as number | undefined) ?? 70;
 
-  const { data: jobs } = await supabase
-    .from("jobs")
-    .select("id, company, title, location, entry_method, likely_expired, last_seen_at")
-    .order("last_seen_at", { ascending: false })
-    .limit(25);
+  let rows: MatchRow[] = [];
 
-  const jobIds = (jobs ?? []).map((j) => j.id as string);
-  const { data: matches } =
-    profile && jobIds.length > 0
-      ? await supabase
-          .from("job_matches")
-          .select("id, job_id, score, rationale_text, flags, status")
-          .eq("profile_version", profile.version)
-          .in("job_id", jobIds)
-      : { data: [] };
+  if (userId && (statusFilter === "applied" || statusFilter === "dismissed")) {
+    const orderColumn = statusFilter === "applied" ? "applied_at" : "created_at";
+    const { data: matches } = await supabase
+      .from("job_matches")
+      .select("id, job_id, score, rationale_text, flags, status")
+      .eq("user_id", userId)
+      .eq("status", statusFilter)
+      .order(orderColumn, { ascending: false })
+      .limit(25);
 
-  const matchByJobId = new Map((matches ?? []).map((m) => [m.job_id as string, m]));
+    const jobIds = (matches ?? []).map((m) => m.job_id as string);
+    const { data: jobs } =
+      jobIds.length > 0
+        ? await supabase.from("jobs").select("id, company, title, location, entry_method, likely_expired").in("id", jobIds)
+        : { data: [] };
+    const jobById = new Map((jobs ?? []).map((j) => [j.id as string, j]));
 
-  const matchIds = (matches ?? []).map((m) => m.id as string);
-  const { data: drafts } =
-    matchIds.length > 0
-      ? await supabase.from("application_drafts").select("id, job_match_id").in("job_match_id", matchIds)
-      : { data: [] };
-  const draftIdByMatchId = new Map((drafts ?? []).map((d) => [d.job_match_id as string, d.id as string]));
+    const matchIds = (matches ?? []).map((m) => m.id as string);
+    const { data: drafts } =
+      matchIds.length > 0
+        ? await supabase.from("application_drafts").select("id, job_match_id, screening_answers").in("job_match_id", matchIds)
+        : { data: [] };
+    const draftByMatchId = new Map((drafts ?? []).map((d) => [d.job_match_id as string, d]));
+
+    rows = (matches ?? []).flatMap((m) => {
+      const job = jobById.get(m.job_id as string);
+      if (!job) return [];
+      const draft = draftByMatchId.get(m.id as string);
+      return [
+        {
+          jobId: job.id as string,
+          title: job.title as string,
+          company: job.company as string,
+          location: job.location as string | null,
+          entryMethod: job.entry_method as string,
+          likelyExpired: job.likely_expired as boolean,
+          match: {
+            id: m.id as string,
+            score: m.score as number | null,
+            rationaleText: m.rationale_text as string | null,
+            flags: (m.flags as string[] | null) ?? [],
+            status: m.status as string,
+          },
+          draftId: draft ? (draft.id as string) : null,
+          unfilledPlaceholderCount: draft ? countUnfilledPlaceholders(draft.screening_answers as ScreeningAnswer[] | null) : 0,
+        },
+      ];
+    });
+  } else {
+    const { data: jobs } = await supabase
+      .from("jobs")
+      .select("id, company, title, location, entry_method, likely_expired, last_seen_at")
+      .order("last_seen_at", { ascending: false })
+      .limit(25);
+
+    const jobIds = (jobs ?? []).map((j) => j.id as string);
+    const { data: matches } =
+      profile && jobIds.length > 0
+        ? await supabase
+            .from("job_matches")
+            .select("id, job_id, score, rationale_text, flags, status")
+            .eq("profile_version", profile.version)
+            .in("job_id", jobIds)
+        : { data: [] };
+
+    const matchByJobId = new Map((matches ?? []).map((m) => [m.job_id as string, m]));
+
+    const matchIds = (matches ?? []).map((m) => m.id as string);
+    const { data: drafts } =
+      matchIds.length > 0
+        ? await supabase.from("application_drafts").select("id, job_match_id, screening_answers").in("job_match_id", matchIds)
+        : { data: [] };
+    const draftByMatchId = new Map((drafts ?? []).map((d) => [d.job_match_id as string, d]));
+
+    rows = (jobs ?? []).flatMap((job) => {
+      const m = matchByJobId.get(job.id as string);
+      // "active" view: a job whose current match is already applied/dismissed
+      // isn't part of the active pipeline anymore — drop it here rather than
+      // showing a done/skipped item mixed in with jobs still needing action.
+      if (statusFilter === "active" && m && (m.status === "applied" || m.status === "dismissed")) {
+        return [];
+      }
+      const draft = m ? draftByMatchId.get(m.id as string) : undefined;
+      return [
+        {
+          jobId: job.id as string,
+          title: job.title as string,
+          company: job.company as string,
+          location: job.location as string | null,
+          entryMethod: job.entry_method as string,
+          likelyExpired: job.likely_expired as boolean,
+          match: m
+            ? {
+                id: m.id as string,
+                score: m.score as number | null,
+                rationaleText: m.rationale_text as string | null,
+                flags: (m.flags as string[] | null) ?? [],
+                status: m.status as string,
+              }
+            : null,
+          draftId: draft ? (draft.id as string) : null,
+          unfilledPlaceholderCount: draft ? countUnfilledPlaceholders(draft.screening_answers as ScreeningAnswer[] | null) : 0,
+        },
+      ];
+    });
+  }
+
+  if (sort === "score") {
+    rows = [...rows].sort((a, b) => (b.match?.score ?? -1) - (a.match?.score ?? -1));
+  }
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -67,91 +174,40 @@ export default async function DashboardPage() {
         {!profile && " Upload a resume in Settings to start getting match scores."}
       </p>
 
-      <div className="flex gap-3">
-        <Link
-          href="/jobs/new"
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white dark:bg-gray-100 dark:text-gray-900"
-        >
-          Add job manually
-        </Link>
-        <Link
-          href="/sources"
-          className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium dark:border-gray-700"
-        >
-          Manage sources
-        </Link>
-        <Link
-          href="/settings"
-          className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium dark:border-gray-700"
-        >
-          Settings
-        </Link>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex gap-3">
+          <Link
+            href="/jobs/new"
+            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white dark:bg-gray-100 dark:text-gray-900"
+          >
+            Add job manually
+          </Link>
+          <Link
+            href="/sources"
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium dark:border-gray-700"
+          >
+            Manage sources
+          </Link>
+          <Link
+            href="/settings"
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium dark:border-gray-700"
+          >
+            Settings
+          </Link>
+        </div>
+        <DashboardFilters sort={sort} status={statusFilter} />
       </div>
 
       <div className="flex flex-col gap-2">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-          Recent jobs ({jobs?.length ?? 0})
+          Jobs ({rows.length})
         </h2>
-        {!jobs || jobs.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-500">
-            No jobs yet — add one manually or wait for the next ingestion run.
+            Nothing here — add a job manually or wait for the next ingestion run.
           </p>
         ) : (
-          <ul className="flex flex-col divide-y divide-gray-200 dark:divide-gray-800">
-            {jobs.map((job) => {
-              const match = matchByJobId.get(job.id as string);
-              return (
-                <li key={job.id as string} className="flex flex-col gap-1 py-3 text-sm">
-                  <span className="font-medium">
-                    {job.title as string} — {job.company as string}
-                  </span>
-                  <span className="text-gray-500 dark:text-gray-400">
-                    {(job.location as string | null) ?? "Location unknown"} ·{" "}
-                    {job.entry_method as string}
-                    {job.likely_expired ? " · possibly expired" : ""}
-                  </span>
-
-                  {match && match.status === "match_failed" && (
-                    <span className="text-xs text-red-600 dark:text-red-400">
-                      Matching failed for this job — will retry next cycle.
-                    </span>
-                  )}
-
-                  {match && match.status !== "match_failed" && match.score !== null && (
-                    <div className="flex flex-col gap-1 rounded-md bg-gray-50 p-2 dark:bg-gray-900">
-                      <span className="font-semibold">Score: {match.score as number}/100</span>
-                      <span className="text-gray-700 dark:text-gray-300">{match.rationale_text as string}</span>
-                      {((match.flags as string[] | null) ?? []).length > 0 && (
-                        <ul className="flex flex-col gap-0.5">
-                          {(match.flags as string[]).map((f, i) => (
-                            <li key={i} className="text-amber-700 dark:text-amber-400">
-                              ⚠ {f}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      {(() => {
-                        const draftId = draftIdByMatchId.get(match.id as string);
-                        if (draftId) {
-                          return (
-                            <Link href={`/drafts/${draftId}`} className="text-blue-700 underline dark:text-blue-400">
-                              View draft
-                            </Link>
-                          );
-                        }
-                        if (match.status === "new") {
-                          return <DraftButton jobMatchId={match.id as string} />;
-                        }
-                        return null;
-                      })()}
-                    </div>
-                  )}
-
-                  {!match && profile && <MatchButton jobId={job.id as string} />}
-                </li>
-              );
-            })}
-          </ul>
+          <MatchesList rows={rows} matchThreshold={matchThreshold} hasProfile={!!profile} />
         )}
       </div>
     </main>
