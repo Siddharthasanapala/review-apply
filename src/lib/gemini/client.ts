@@ -6,10 +6,16 @@ import { GoogleGenAI } from "@google/genai";
  * - EXTRACTION_MODEL: flash-tier — structured extraction runs rarely (only
  *   on resume/portfolio upload), so cost isn't the driver, but flash-tier
  *   quality is sufficient for this task and keeps things cheap by default.
+ * - MATCHING_MODEL: flash-lite — matching runs at BATCH volume across
+ *   every ingested job, and real testing found EXTRACTION_MODEL
+ *   ("gemini-flash-latest", resolving to gemini-3.5-flash) has a free-tier
+ *   cap of just 5 requests/minute — too tight for batch scoring. Flash-lite
+ *   has a more generous free-tier RPM/RPD, better suited to this volume.
  * - EMBEDDING_MODEL: gemini-embedding-2, recommended for semantic
  *   similarity use cases, 8192 token input limit (fits full resumes).
  */
 export const EXTRACTION_MODEL = "gemini-flash-latest";
+export const MATCHING_MODEL = "gemini-flash-lite-latest";
 export const EMBEDDING_MODEL = "gemini-embedding-2";
 export const EMBEDDING_DIMENSIONS = 768;
 

@@ -239,3 +239,65 @@ don't re-litigate an entry here without a concrete new reason.
   is meant to guarantee for a deployed app with a public URL. Optional
   (unset = no restriction) so this doesn't become a required-at-boot var
   for anyone who forks this later.
+
+## Phase 4
+
+- **Phase 3 gap fixed**: `extractProfile()` has always returned
+  `experienceSummary`/`yearsExperienceByDomain`/`notableProjects`, but only
+  `skills` was ever persisted — the rest were silently discarded. Matching
+  needs them as prompt input, so added the missing columns to
+  `profile_documents` and updated `saveResumeDocument`/`savePortfolioDocument`
+  to store them. Existing resume/portfolio rows have these as null until
+  re-uploaded (not backfilled).
+- **Job embeddings generated lazily at match time**, not during Phase 2
+  ingestion — `jobs.embedding` starts null and `ensureJobEmbedding()` fills
+  it in (and persists it) the first time a job is considered for matching,
+  so repeat runs don't re-embed the same job.
+- **Real bug found via testing: pgvector columns come back from
+  Supabase/PostgREST as their string representation** (`"[0.01,-0.02,...]"`),
+  not a parsed array. `cosineSimilarity` initially did `.length` on this
+  string and threw "dimension mismatch: 768 vs 9576" (9576 being the
+  *character* count, not vector dimensions) — every embedding read back
+  from the database now goes through `lib/matching/parseEmbedding.ts`
+  first; embeddings fresh out of the Gemini SDK don't need it. Also
+  retyped the raw DB row fields as `unknown` instead of `number[] | null`
+  so this class of bug can't quietly recur.
+- **Matching uses a different, lighter model than extraction** — real
+  testing hit `RESOURCE_EXHAUSTED` (429) mid-batch-run: `gemini-flash-latest`
+  (used for Phase 3 extraction) resolves to `gemini-3.5-flash`, whose free
+  tier is just **5 requests/minute** (docs suggested 10-15; actual observed
+  limit was tighter). Since matching runs at batch volume, switched to
+  `gemini-flash-lite-latest` (`MATCHING_MODEL` in `lib/gemini/client.ts`),
+  which has a more generous free-tier RPM/RPD — `EXTRACTION_MODEL` stays
+  on the pricier/slower model since Phase 3 extraction is low-volume and
+  quality-sensitive.
+- **Cost-control knobs, tuned against real timing**: `MAX_JOBS_PER_RUN = 5`
+  and `maxDuration = 60` on `/api/match` — matching calls took 8-16s each
+  in testing, so the original `MAX_JOBS_PER_RUN = 10` took 80s wall-clock,
+  which would be killed by Vercel's 60s Hobby-plan limit; 5 jobs
+  consistently finished in ~18-20s in testing. `MAX_CALLS_PER_DAY = 150`
+  for the `gemini_call_log` "matching" purpose counter — conservative
+  relative to flash-lite's real ~1000 RPD, leaves headroom for other
+  Gemini usage sharing the same project key. With ~950 jobs in the initial
+  backlog, full first-pass coverage will take multiple days at this rate,
+  by design (respecting free-tier limits over blasting through backlog).
+- **`match_failed` rows are retried on subsequent runs**, not left stuck —
+  the "already matched" query explicitly excludes `status = 'match_failed'`
+  from what counts as already-covered, since `scoreJob`'s upsert
+  (`onConflict: job_id,profile_version`) naturally overwrites a stale
+  failure with a real result once a retry succeeds. Confirmed via real
+  429 failure → later run picked the same job back up.
+- **Verified with real data, not synthetic**: ran a full batch match
+  against 954 real jobs (10 real Gemini-scored results in the first run,
+  including a genuine 429 rate-limit failure handled gracefully — the
+  pipeline logged it and kept scoring the other 9); confirmed idempotency
+  (candidate count dropped by exactly the number successfully scored);
+  confirmed the cost-cap path stops immediately with zero wasted calls
+  when maxed out, and resets cleanly; confirmed the on-demand single-job
+  match works end-to-end through the real UI on an actual LinkedIn-sourced
+  manual job entry (Pythian SRE role — score 75, "good-fit", accurate
+  matched/missing skills, correct legitimacy flag for manual entry).
+- **Score threshold** stored as `users.settings.matchThreshold` (jsonb,
+  default 70) — a single jsonb column rather than a dedicated settings
+  table, since more per-user settings will land in later phases (Phase 7
+  notification schedule) and this avoids a new table per setting.

@@ -85,6 +85,9 @@ export async function saveResumeDocument(
       raw_text: rawText,
       storage_path: storagePath,
       parsed_skills: mergedSkills,
+      experience_summary: extraction.ok ? extraction.profile.experienceSummary : null,
+      years_experience_by_domain: extraction.ok ? extraction.profile.yearsExperienceByDomain : null,
+      notable_projects: extraction.ok ? extraction.profile.notableProjects : null,
       embedding: embedding.ok ? embedding.embedding : null,
       version_number: version,
     })
@@ -123,6 +126,9 @@ export async function savePortfolioDocument(
       raw_text: rawText,
       storage_path: sourceUrl,
       parsed_skills: skills,
+      experience_summary: extraction.ok ? extraction.profile.experienceSummary : null,
+      years_experience_by_domain: extraction.ok ? extraction.profile.yearsExperienceByDomain : null,
+      notable_projects: extraction.ok ? extraction.profile.notableProjects : null,
       embedding: embedding.ok ? embedding.embedding : null,
       version_number: version,
     })

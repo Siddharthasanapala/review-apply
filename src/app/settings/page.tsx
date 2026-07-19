@@ -5,6 +5,7 @@ import { getLatestProfileDocument } from "@/lib/profile/profileDocuments";
 import { ResumeUploadForm } from "./ResumeUploadForm";
 import { PortfolioForm } from "./PortfolioForm";
 import { SkillsEditor } from "./SkillsEditor";
+import { ThresholdSetting } from "./ThresholdSetting";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -15,11 +16,13 @@ export default async function SettingsPage() {
   const supabase = getSupabaseServerClient();
   const { data: userRow } = await supabase
     .from("users")
-    .select("id")
+    .select("id, settings")
     .eq("email", session.user.email)
     .single();
 
   const userId = userRow?.id as string | undefined;
+  const matchThreshold =
+    ((userRow?.settings as Record<string, unknown> | null)?.matchThreshold as number | undefined) ?? 70;
 
   const [resume, portfolio] = userId
     ? await Promise.all([
@@ -81,6 +84,16 @@ export default async function SettingsPage() {
           key={(resume?.id as string) ?? "no-resume"}
           initialSkills={(resume?.parsed_skills as string[] | null) ?? []}
         />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold">Match score threshold</h2>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Jobs scoring at or above this are what future notifications (Phase
+          7) will surface. All matches remain visible on the dashboard
+          regardless of threshold.
+        </p>
+        <ThresholdSetting initialThreshold={matchThreshold} />
       </section>
     </main>
   );
