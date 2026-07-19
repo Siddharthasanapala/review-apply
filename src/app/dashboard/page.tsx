@@ -4,6 +4,7 @@ import { auth, signOut } from "@/auth";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getProfileForMatching } from "@/lib/matching/scoreJob";
 import { MatchButton } from "./MatchButton";
+import { DraftButton } from "./DraftButton";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -29,12 +30,19 @@ export default async function DashboardPage() {
     profile && jobIds.length > 0
       ? await supabase
           .from("job_matches")
-          .select("job_id, score, rationale_text, flags, status")
+          .select("id, job_id, score, rationale_text, flags, status")
           .eq("profile_version", profile.version)
           .in("job_id", jobIds)
       : { data: [] };
 
   const matchByJobId = new Map((matches ?? []).map((m) => [m.job_id as string, m]));
+
+  const matchIds = (matches ?? []).map((m) => m.id as string);
+  const { data: drafts } =
+    matchIds.length > 0
+      ? await supabase.from("application_drafts").select("id, job_match_id").in("job_match_id", matchIds)
+      : { data: [] };
+  const draftIdByMatchId = new Map((drafts ?? []).map((d) => [d.job_match_id as string, d.id as string]));
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-8">
@@ -122,6 +130,20 @@ export default async function DashboardPage() {
                           ))}
                         </ul>
                       )}
+                      {(() => {
+                        const draftId = draftIdByMatchId.get(match.id as string);
+                        if (draftId) {
+                          return (
+                            <Link href={`/drafts/${draftId}`} className="text-blue-700 underline dark:text-blue-400">
+                              View draft
+                            </Link>
+                          );
+                        }
+                        if (match.status === "new") {
+                          return <DraftButton jobMatchId={match.id as string} />;
+                        }
+                        return null;
+                      })()}
                     </div>
                   )}
 

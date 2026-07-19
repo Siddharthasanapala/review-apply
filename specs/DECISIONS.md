@@ -301,3 +301,60 @@ don't re-litigate an entry here without a concrete new reason.
   default 70) — a single jsonb column rather than a dedicated settings
   table, since more per-user settings will land in later phases (Phase 7
   notification schedule) and this avoids a new table per setting.
+
+## Phase 5
+
+- **Drafting pipeline is 4 sequential Gemini calls** per job: tailor resume
+  (`EXTRACTION_MODEL`) → fabrication check on that specific output
+  (`EXTRACTION_MODEL`, adversarial framing) → cover letter
+  (`MATCHING_MODEL`, with a stricter one-shot regen if it reads generic) →
+  screening answers (`MATCHING_MODEL`). Tailoring and the fabrication check
+  stay on the pricier/quality-sensitive model since a missed fabrication or
+  a bad tailoring edit has real consequences; cover letter and screening
+  answers use the higher-RPM model since they're lower-stakes free text.
+- **Fabrication check is a separate adversarial call, not string-diffing**
+  — deliberately skeptical prompt framing, comparing base resume against
+  tailored resume specifically (not against the JD). Verified via a real
+  test injecting 5 fake claims into a tailored resume (fake title, fake
+  dates, fake team-leadership claim, an entirely fabricated second job,
+  fake certifications) — caught all 5/5.
+- **Real bug found via testing: screening-answer placeholders were
+  "soft," not hard-enforced.** `ALWAYS_PLACEHOLDER_PATTERNS` regex
+  (salary/compensation/work authorization/sponsorship/visa/relocation)
+  was only applied when the model *failed* to set `isPlaceholder=true`.
+  Real testing showed the model correctly flagged these questions as
+  placeholders but still wrote soft deflection text (e.g. "Please share
+  your target compensation range") instead of a hard fill-in instruction
+  — exactly the "getting this wrong has real consequences" case
+  CONSTITUTION.md calls out. Fixed: `forcePlaceholders()` in
+  `draftScreeningAnswers.ts` now unconditionally overwrites both the
+  answer text and reason for any matched category, regardless of what the
+  model output. Re-verified via a temp test route: both a salary question
+  and a visa-sponsorship question came back with the exact fixed
+  placeholder string.
+- **`MAX_DRAFTS_PER_RUN = 1`** (down from an initial guess of 2) — real
+  timing measured ~33s wall-clock for one job's full 4-call pipeline; 2
+  jobs risked ~66s against Vercel's 60s Hobby-plan `maxDuration`. Matches
+  the same "measure real timing, tune the batch cap" pattern used in
+  Phase 2 (Greenhouse) and Phase 4 (matching).
+- **On-demand drafting route** (`/api/draft/[jobMatchId]`, session-authed)
+  lets the user draft a below-threshold job they're still curious about,
+  separate from the cron batch route which only drafts jobs already at or
+  above `matchThreshold`. Fetches the specific profile version the match
+  was scored against (not necessarily the latest resume), so a draft
+  always reflects the profile state the match itself was based on.
+  Verified end-to-end through the real dashboard UI against a real
+  below-threshold job.
+- **`/drafts/[id]` is deliberately plain**, not the redline/review UI —
+  that's Phase 6's job. This page exists to sanity-check drafting output:
+  fabrication flags (if any), resume changes as strikethrough/highlight
+  pairs with a reason, full tailored resume text behind a `<details>`,
+  cover letter, screening answers (placeholders visually distinct), and
+  any additional-materials-requested the app can't draft.
+- **Verified with real data, not synthetic**: full pipeline run against
+  the real Pythian SRE job — cover letter explicitly named "Pythian"
+  multiple times and cited specific JD details (Kubernetes clusters,
+  observability, Prometheus/Grafana) plus concrete candidate projects
+  rather than generic filler; resume diff produced sensible
+  section-level changes with stated reasons; fabrication check passed
+  clean on the real (non-injected) tailored output.
