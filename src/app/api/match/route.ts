@@ -1,4 +1,4 @@
-import { verifyCronSecret } from "@/lib/cron/verifyCronSecret";
+import { verifyCronOrSession } from "@/lib/cron/verifyCronOrSession";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { env } from "@/lib/env";
 import { checkAndBumpGeminiQuota } from "@/lib/gemini/quota";
@@ -39,7 +39,7 @@ interface JobRow {
 }
 
 export async function POST(request: Request) {
-  const unauthorized = verifyCronSecret(request);
+  const unauthorized = await verifyCronOrSession(request);
   if (unauthorized) return unauthorized;
 
   const supabase = getSupabaseServerClient();

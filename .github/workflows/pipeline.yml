@@ -1,0 +1,35 @@
+name: JobPilot Pipeline
+
+# Default: every 6 hours. Edit the cron expression below to change the
+# cadence (https://crontab.guru helps) — no code change needed elsewhere.
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {}
+
+env:
+  APP_URL: https://jobpilot-five-gamma.vercel.app
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ingest
+        run: curl -sf -X POST "$APP_URL/api/ingest" -H "Authorization: Bearer $CRON_SECRET"
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+
+      - name: Match
+        run: curl -sf -X POST "$APP_URL/api/match" -H "Authorization: Bearer $CRON_SECRET"
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+
+      - name: Draft
+        run: curl -sf -X POST "$APP_URL/api/draft" -H "Authorization: Bearer $CRON_SECRET"
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+
+      - name: Notify
+        run: curl -sf -X POST "$APP_URL/api/notify" -H "Authorization: Bearer $CRON_SECRET"
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}

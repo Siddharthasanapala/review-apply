@@ -1,4 +1,4 @@
-import { verifyCronSecret } from "@/lib/cron/verifyCronSecret";
+import { verifyCronOrSession } from "@/lib/cron/verifyCronOrSession";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { createGreenhouseAdapter, type GreenhouseConfig } from "@/lib/sources/greenhouse";
 import { createAdzunaAdapter, type AdzunaConfig } from "@/lib/sources/adzuna";
@@ -6,6 +6,8 @@ import { checkAndBumpQuota } from "@/lib/jobs/quota";
 import { upsertIngestedJobsBatch } from "@/lib/jobs/ingestJob";
 import type { JobSourceAdapter, RawListing } from "@/lib/sources/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { acquirePipelineLock } from "@/lib/cron/pipelineLock";
+import { env } from "@/lib/env";
 
 // Vercel Hobby caps functions at 10s by default; 60 is the max Hobby
 // allows. Greenhouse/Adzuna can each make dozens of outbound requests in
@@ -34,10 +36,19 @@ const STALE_THRESHOLD_MS = 48 * 60 * 60 * 1000;
 // Idempotent and safe to re-run: every source's listings are upserted on
 // (source_id, external_id) in bulk, never blindly appended.
 export async function POST(request: Request) {
-  const unauthorized = verifyCronSecret(request);
+  const unauthorized = await verifyCronOrSession(request);
   if (unauthorized) return unauthorized;
 
   const supabase = getSupabaseServerClient();
+
+  // Ingest is the pipeline's first step — acquire the run lock here.
+  // GitHub Actions won't double-queue a scheduled run, but this also has
+  // to guard against the manual "Run now" button overlapping one.
+  const trigger = request.headers.get("authorization") === `Bearer ${env.CRON_SECRET}` ? "cron" : "manual";
+  const lock = await acquirePipelineLock(supabase, trigger);
+  if (!lock.ok) {
+    return Response.json({ error: lock.reason }, { status: 409 });
+  }
 
   const { data: sources, error: sourcesError } = await supabase
     .from("job_sources")

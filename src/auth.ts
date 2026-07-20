@@ -31,13 +31,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       const supabase = getSupabaseServerClient();
-      const { error } = await supabase.from("users").upsert(
-        {
-          google_id: account.providerAccountId,
-          email: user.email,
-        },
-        { onConflict: "google_id" },
-      );
+      const upsertRow: Record<string, unknown> = {
+        google_id: account.providerAccountId,
+        email: user.email,
+      };
+
+      // Only present on the incremental-consent round-trip triggered by
+      // "Connect Gmail" in Settings (which requests access_type=offline +
+      // prompt=consent) — the default login flow never sees this field.
+      // A successful re-auth also means any previous "paused" state (bad
+      // token, revoked access) is resolved.
+      if (account.refresh_token) {
+        upsertRow.google_refresh_token = account.refresh_token;
+        upsertRow.notifications_paused = false;
+        upsertRow.notifications_paused_reason = null;
+      }
+
+      const { error } = await supabase.from("users").upsert(upsertRow, { onConflict: "google_id" });
 
       if (error) {
         console.error("Failed to upsert user on sign-in:", error.message);

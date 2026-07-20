@@ -442,3 +442,77 @@ don't re-litigate an entry here without a concrete new reason.
   URL is a plain `<a href={job.description_url} target="_blank">` the
   user clicks themselves. No automation library (Puppeteer/Playwright/
   Selenium) is a direct dependency.
+
+## Phase 7
+
+- **Gmail send via the raw Gmail API (`users.messages.send`), not
+  nodemailer/SMTP** — reuses the same Google OAuth client already
+  configured for sign-in instead of managing separate SMTP credentials.
+  The refresh token needed to send with no live user session comes from
+  an incremental-consent re-auth (`access_type=offline&prompt=consent`),
+  requested only when the user clicks "Connect Gmail" in Settings — the
+  default sign-in flow still only asks for `openid email profile`.
+- **The four pipeline routes (`/api/ingest`, `/api/match`, `/api/draft`,
+  `/api/notify`) now accept either a `CRON_SECRET` bearer token or a valid
+  session** (`lib/cron/verifyCronOrSession.ts`, replacing the old
+  cron-only `verifyCronSecret.ts`, which is now dead code and deleted) —
+  needed so Settings' "Run now" button can call the exact same routes the
+  GitHub Actions workflow calls, per phase-07 task 4.
+- **DB-based pipeline lock, not a distributed lock service**: a single
+  `pipeline_runs` row per run, acquired by `/api/ingest` (the first step)
+  and released by `/api/notify` (the last step) — `lib/cron/pipelineLock.ts`.
+  A stale-lock timeout (15 min) prevents a crashed mid-sequence run (e.g.
+  match or draft fails and the GitHub Actions job stops before reaching
+  notify) from permanently blocking future runs; the next `/api/ingest`
+  call detects the stale row, marks it `failed`, and proceeds. Verified
+  for real: firing two concurrent `/api/ingest` calls got a 200 on the
+  first and a 409 ("A pipeline run is already in progress.") on the
+  second.
+- **`notifications_enabled`/`timezone` live in `users.settings` jsonb**
+  (same pattern as `matchThreshold`, Phase 4) since they're user-tunable
+  preferences; `google_refresh_token`/`notifications_paused(_reason)`/
+  `last_notified_at` are dedicated columns (migration 0006) since they're
+  server-written pipeline/auth state, not something a user edits via a
+  form — mirrors the existing split between `users.settings` and
+  dedicated columns already established for the rest of the table.
+- **Timezone only affects display, not the query window** — "since last
+  digest" is computed by comparing `job_matches.created_at` (an absolute
+  timestamp) against `users.last_notified_at`, which is correct regardless
+  of the user's timezone. The stored `timezone` setting exists for future
+  display use (e.g. showing times in the digest in local time) rather than
+  changing what counts as "new."
+- **`last_notified_at` only advances on `sent` or `skipped_no_matches`,
+  never on `failed`** — a Gmail auth/send failure must not cause the
+  matches from that window to silently disappear from the next digest.
+  Verified for real: corrupted the stored refresh token, ran `/api/notify`
+  with `last_notified_at` reset to null so there was something to send,
+  confirmed the failure path set `notifications_paused = true` with the
+  reason `"Gmail access expired — please reconnect."`, and confirmed
+  `last_notified_at` stayed null (not advanced) throughout.
+- **Real bug found via testing — actually a sequencing issue, not a code
+  bug**: the first "Connect Gmail" attempt didn't return a refresh token.
+  Diagnosed by temporarily logging `hasRefreshToken`/`scope` into an
+  unused DB column (no access to the dev server's stdout from the
+  debugging session) rather than guessing — confirmed the OAuth
+  round-trip and `authorizationParams` plumbing were correct all along;
+  the real cause was that the Google Cloud OAuth consent screen was still
+  in "Testing" publishing status and the user's own account hadn't been
+  added as a test user yet, so Google silently declined the sensitive
+  `gmail.send` scope grant. Once added as a test user, the retry
+  correctly returned `hasRefreshToken=true` with `gmail.send` in the
+  granted scope. Debug code was removed after confirming.
+- **Known limitation, accepted**: refresh tokens issued while a Google
+  Cloud OAuth app is in "Testing" publishing status can expire after
+  about 7 days regardless of use. For this single-user hobby-scale app,
+  documented in README as "click Reconnect Gmail if notifications stop"
+  rather than pursuing full app verification/production publishing,
+  which buys nothing here beyond removing an occasional one-click
+  reconnect.
+- **Verified with real data, not synthetic**: full manual walkthrough —
+  Connect Gmail (real incremental consent, real refresh token captured),
+  enabling notifications + timezone (confirmed persisted), "Run now"
+  (all four steps completed, a real digest email arrived with a working
+  "Review this match →" link into the correct draft page), concurrent
+  pipeline lock (409 on overlap, confirmed via direct curl test), and the
+  auth-failure banner (confirmed showing on both dashboard and settings,
+  then cleared automatically on reconnect).

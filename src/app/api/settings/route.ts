@@ -2,7 +2,11 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
-const bodySchema = z.object({ matchThreshold: z.number().min(0).max(100) });
+const bodySchema = z.object({
+  matchThreshold: z.number().min(0).max(100).optional(),
+  notificationsEnabled: z.boolean().optional(),
+  timezone: z.string().min(1).optional(),
+});
 
 export async function PATCH(request: Request) {
   const session = await auth();
@@ -29,7 +33,7 @@ export async function PATCH(request: Request) {
   const currentSettings = (userRow.settings as Record<string, unknown> | null) ?? {};
   const { error } = await supabase
     .from("users")
-    .update({ settings: { ...currentSettings, matchThreshold: parsed.data.matchThreshold } })
+    .update({ settings: { ...currentSettings, ...parsed.data } })
     .eq("id", userRow.id);
 
   if (error) {

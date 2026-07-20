@@ -31,8 +31,14 @@ export default async function DashboardPage({
   const { sort = "score", status: statusFilter = "active" } = await searchParams;
 
   const supabase = getSupabaseServerClient();
-  const { data: userRow } = await supabase.from("users").select("id, settings").eq("email", session.user.email).single();
+  const { data: userRow } = await supabase
+    .from("users")
+    .select("id, settings, notifications_paused, notifications_paused_reason")
+    .eq("email", session.user.email)
+    .single();
   const userId = userRow?.id as string | undefined;
+  const notificationsPaused = (userRow?.notifications_paused as boolean | undefined) ?? false;
+  const notificationsPausedReason = userRow?.notifications_paused_reason as string | null | undefined;
 
   const profile = userId ? await getProfileForMatching(supabase, userId) : null;
   const matchThreshold =
@@ -169,6 +175,15 @@ export default async function DashboardPage({
           </button>
         </form>
       </div>
+      {notificationsPaused && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          ⚠ Notifications paused: {notificationsPausedReason ?? "unknown reason"}.{" "}
+          <Link href="/settings" className="underline">
+            Reconnect Gmail in Settings
+          </Link>{" "}
+          to resume.
+        </div>
+      )}
       <p className="text-sm text-gray-600 dark:text-gray-400">
         Signed in as {session.user.email}.
         {!profile && " Upload a resume in Settings to start getting match scores."}

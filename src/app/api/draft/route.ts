@@ -1,4 +1,4 @@
-import { verifyCronSecret } from "@/lib/cron/verifyCronSecret";
+import { verifyCronOrSession } from "@/lib/cron/verifyCronOrSession";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { env } from "@/lib/env";
 import { draftApplication, type DraftInput } from "@/lib/drafting/draftApplication";
@@ -12,7 +12,7 @@ export const maxDuration = 60;
 const MAX_DRAFTS_PER_RUN = 1;
 
 export async function POST(request: Request) {
-  const unauthorized = verifyCronSecret(request);
+  const unauthorized = await verifyCronOrSession(request);
   if (unauthorized) return unauthorized;
 
   const supabase = getSupabaseServerClient();

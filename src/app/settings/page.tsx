@@ -6,6 +6,9 @@ import { ResumeUploadForm } from "./ResumeUploadForm";
 import { PortfolioForm } from "./PortfolioForm";
 import { SkillsEditor } from "./SkillsEditor";
 import { ThresholdSetting } from "./ThresholdSetting";
+import { ConnectGmailButton } from "./ConnectGmailButton";
+import { NotificationsSettings } from "./NotificationsSettings";
+import { RunPipelineButton } from "./RunPipelineButton";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -16,13 +19,18 @@ export default async function SettingsPage() {
   const supabase = getSupabaseServerClient();
   const { data: userRow } = await supabase
     .from("users")
-    .select("id, settings")
+    .select("id, settings, google_refresh_token, notifications_paused, notifications_paused_reason")
     .eq("email", session.user.email)
     .single();
 
   const userId = userRow?.id as string | undefined;
-  const matchThreshold =
-    ((userRow?.settings as Record<string, unknown> | null)?.matchThreshold as number | undefined) ?? 70;
+  const settings = (userRow?.settings as Record<string, unknown> | null) ?? {};
+  const matchThreshold = (settings.matchThreshold as number | undefined) ?? 70;
+  const notificationsEnabled = (settings.notificationsEnabled as boolean | undefined) ?? false;
+  const timezone = (settings.timezone as string | undefined) ?? "UTC";
+  const gmailConnected = !!userRow?.google_refresh_token;
+  const notificationsPaused = (userRow?.notifications_paused as boolean | undefined) ?? false;
+  const notificationsPausedReason = userRow?.notifications_paused_reason as string | null | undefined;
 
   const [resume, portfolio] = userId
     ? await Promise.all([
@@ -89,11 +97,42 @@ export default async function SettingsPage() {
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold">Match score threshold</h2>
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          Jobs scoring at or above this are what future notifications (Phase
-          7) will surface. All matches remain visible on the dashboard
-          regardless of threshold.
+          Jobs scoring at or above this are what digest notifications
+          surface. All matches remain visible on the dashboard regardless of
+          threshold.
         </p>
         <ThresholdSetting initialThreshold={matchThreshold} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold">Notifications</h2>
+        {notificationsPaused && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            ⚠ Notifications paused: {notificationsPausedReason ?? "unknown reason"}. Reconnect Gmail below to
+            resume.
+          </div>
+        )}
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {gmailConnected
+            ? "Gmail connected ✓"
+            : "Connect Gmail to enable digest emails (this asks for permission to send email on your behalf, nothing else)."}
+        </p>
+        <ConnectGmailButton label={gmailConnected ? "Reconnect Gmail" : "Connect Gmail"} />
+        <NotificationsSettings
+          initialEnabled={notificationsEnabled}
+          initialTimezone={timezone}
+          gmailConnected={gmailConnected}
+        />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-semibold">Pipeline</h2>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Runs ingest → match → draft → notify in sequence, same as the
+          scheduled GitHub Actions workflow. Useful right after updating
+          your resume, or for testing.
+        </p>
+        <RunPipelineButton />
       </section>
     </main>
   );
